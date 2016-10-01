@@ -1,7 +1,10 @@
 //#include<xc.h>
 #include<p33FJ256MC710.h>
 #include "UART.h"
+#include "I2C1.h"
+#include <i2c.h>
 #include <math.h>
+#include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -15,6 +18,17 @@ char clat2[10],clat3[12],clon2[11],clon3[12],calt2[12],calt3[12];
 unsigned int k = 0,j = 0 ,h = 0;
 int R = 6371;// don vi km
 char kc12[11],kc13[11],kc23[11],gocPan[11],gocTilt[11];
+
+unsigned long X_axis = 0; 
+unsigned long Y_axis = 0;                                  
+unsigned long Z_axis = 0; 
+
+void Open_I2C1(void);
+void ResetVariables_I2C1(void);
+void WaitFlag1(void);
+void WaitForACK1(void);
+unsigned long make_word1(unsigned char HB, unsigned char LB);
+void ReadByte_I2C1 ();
 
 double calDistance(double lon1, double lat1, double lon2, double lat2);
 double calAngle(double a, double b, double c);
@@ -43,6 +57,7 @@ int main(int argc, char** argv) {
     PORTFbits.RF1 = 1;      //led debug
     
     OpenUART2();
+    Open_I2C1();
     
     panAngle = calPalAngle(lon1,lat1,lon2,lat2,lon3,lat3);
     canh12 = calDistance(lon1, lat1, lon2, lat2);
@@ -50,7 +65,7 @@ int main(int argc, char** argv) {
     tiltAngle = calTiltAngle(canh12, canh13, alt1, alt2, alt3);
     
     //gui qua uart
-
+    
     PrintStringUART2("Goc pan = ");
     doubleToCharAndSendUART2(panAngle);
     WriteCharToUART2(10);
@@ -58,10 +73,18 @@ int main(int argc, char** argv) {
     PrintStringUART2("Goc tilt = ");
     doubleToCharAndSendUART2(tiltAngle);
     WriteCharToUART2(10);
-    WriteCharToUART2(13);    
+    WriteCharToUART2(13);  
+    
+    PrintStringUART2("Lay du lieu");
+    WriteCharToUART2(10);
+    WriteCharToUART2(13);  
+    ReadByte_I2C1();
+    PrintStringUART2("Lay du lieu xong");
+    WriteCharToUART2(10);
+    WriteCharToUART2(13);  
     
     while(1)
-    {
+    {                
         if (h == 1){
             PrintStringUART2("_____________________");
             WriteCharToUART2(10);
@@ -414,4 +437,92 @@ double charToDouble(char *String){
     double d = 0;
     sscanf(String, "%lf", &d);
     return d;
+}
+
+void Open_I2C1(){
+    OpenI2C1((I2C1_ON & I2C1_IDLE_CON & I2C1_CLK_HLD & I2C1_IPMI_DIS &
+             I2C1_7BIT_ADD & I2C1_SLW_EN & I2C1_SM_DIS &
+             I2C1_GCALL_DIS & I2C1_STR_DIS &
+             I2C1_NACK & I2C1_ACK_DIS & I2C1_RCV_DIS &
+             I2C1_STOP_DIS & I2C1_RESTART_DIS &
+             I2C1_START_DIS), 0x4E);
+    
+    IdleI2C1();
+}
+
+void ResetVariables_I2C1(void)
+{
+    I2C1CONbits.ACKEN=0;
+    I2C1CONbits.PEN=0;
+    I2C1CONbits.RCEN=0;
+    I2C1CONbits.RSEN=0;
+    I2C1CONbits.SEN=0;
+}
+
+void WaitFlag1(void)
+{
+    while(!IFS1bits.MI2C1IF);           // wait for flag to be high
+    IFS1bits.MI2C1IF=0;
+}
+void WaitForACK1(void)
+{
+    while(I2C1STATbits.ACKSTAT);        // wait for ack receive from slave
+}
+
+unsigned long make_word1(unsigned char HB, unsigned char LB)
+{                                      
+   register unsigned long val = 0; 
+                               
+   val = HB; 
+   val <<= 8;                          
+   val |= LB;          
+   return val; 
+}  
+
+void ReadByte_I2C1 (){
+   unsigned char msb = 0; 
+   unsigned char lsb = 0; 
+   
+   //PrintStringUART1("Xong");
+   ResetVariables_I2C1();
+   StartI2C1(); 
+   WaitFlag1();
+   //PrintStringUART1("Xong1");
+   
+   //Write Slave address and set master for reception
+   MasterWriteI2C1(HMC5883L_WRITE_ADDR);
+   AckI2C1();
+   WaitFlag1();   
+   //PrintStringUART1("Xong2");   
+   
+   MasterWriteI2C1(X_MSB_Reg);   
+   AckI2C1();
+   WaitFlag1();  
+      
+   RestartI2C1();
+   WaitFlag1();
+   MasterWriteI2C1(HMC5883L_READ_ADDR);   
+   AckI2C1();
+   WaitFlag1();   
+   
+   msb = MasterReadI2C1();    
+   WaitFlag1();      
+   lsb = MasterReadI2C1(); 
+   WaitFlag1();
+   X_axis = make_word1(msb, lsb); 
+   
+   msb = MasterReadI2C1(); 
+   WaitFlag1();
+   lsb = MasterReadI2C1(); 
+   WaitFlag1();
+   Z_axis = make_word1(msb, lsb); 
+                   
+   msb = MasterReadI2C1(); 
+   WaitFlag1();
+   lsb = MasterReadI2C1(); 
+   WaitFlag1();
+   Y_axis = make_word1(msb, lsb); 
+        
+   StopI2C1();
+   
 }
